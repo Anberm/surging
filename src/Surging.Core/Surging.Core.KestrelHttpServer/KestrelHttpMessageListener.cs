@@ -3,11 +3,11 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Surging.Core.CPlatform.Engines;
+using Surging.Core.CPlatform.Module;
 using Surging.Core.CPlatform.Runtime.Server;
 using Surging.Core.CPlatform.Serialization;
-using Surging.Core.KestrelHttpServer.Internal;
-using Surging.Core.Swagger.Builder;
-using Surging.Core.Swagger.SwaggerUI;
+using Surging.Core.KestrelHttpServer.Extensions;
+using Surging.Core.KestrelHttpServer.Internal; 
 using System;
 using System.IO;
 using System.Linq;
@@ -21,48 +21,48 @@ namespace Surging.Core.KestrelHttpServer
     {
         private readonly ILogger<KestrelHttpMessageListener> _logger;
         private IWebHost _host;
+        private bool _isCompleted;
         private readonly ISerializer<string> _serializer;
-        private readonly IServiceSchemaProvider _serviceSchemaProvider;
         private readonly IServiceEngineLifetime _lifetime;
-        private readonly IServiceEntryProvider _serviceEntryProvider;
+        private readonly IModuleProvider _moduleProvider;
 
-        public KestrelHttpMessageListener(ILogger<KestrelHttpMessageListener> logger, 
-            ISerializer<string> serializer,
-            IServiceSchemaProvider serviceSchemaProvider, IServiceEngineLifetime lifetime, IServiceEntryProvider serviceEntryProvider) :base(logger, serializer)
+        public KestrelHttpMessageListener(ILogger<KestrelHttpMessageListener> logger,
+            ISerializer<string> serializer, IServiceEngineLifetime lifetime,IModuleProvider moduleProvider) : base(logger, serializer)
         {
             _logger = logger;
             _serializer = serializer;
-            _serviceSchemaProvider = serviceSchemaProvider;
             _lifetime = lifetime;
-            _serviceEntryProvider = serviceEntryProvider;
+            _moduleProvider = moduleProvider;
         }
-        
+
         public async Task StartAsync(EndPoint endPoint)
         {
-            var ipEndPoint = endPoint as IPEndPoint; 
+            var ipEndPoint = endPoint as IPEndPoint;
             try
             {
-               var hostBuilder = new WebHostBuilder()
-                 .UseContentRoot(Directory.GetCurrentDirectory())
-                 .UseKestrel(options => {
-                     options.Listen(ipEndPoint);
+                var hostBuilder = new WebHostBuilder()
+                  .UseContentRoot(Directory.GetCurrentDirectory())
+                  .UseKestrel(options =>
+                  {
+                      options.Listen(ipEndPoint);
 
-                 })
-                 .ConfigureServices(ConfigureServices)
-                 .ConfigureLogging((logger) => {
-                     logger.AddConfiguration(
-                            CPlatform.AppConfig.GetSection("Logging"));
-                 })
-                 .Configure(AppResolve);
+                  })
+                  .ConfigureServices(ConfigureServices)
+                  .ConfigureLogging((logger) =>
+                  {
+                      logger.AddConfiguration(
+                             CPlatform.AppConfig.GetSection("Logging"));
+                  })
+                  .Configure(AppResolve);
 
                 if (Directory.Exists(CPlatform.AppConfig.ServerOptions.WebRootPath))
-                    hostBuilder = hostBuilder.UseWebRoot(CPlatform.AppConfig.ServerOptions.WebRootPath); 
-                _host= hostBuilder.Build();
+                    hostBuilder = hostBuilder.UseWebRoot(CPlatform.AppConfig.ServerOptions.WebRootPath);
+                _host = hostBuilder.Build();
                 _lifetime.ServiceEngineStarted.Register(async () =>
                 {
                     await _host.RunAsync();
                 });
-              
+
             }
             catch
             {
@@ -73,46 +73,15 @@ namespace Surging.Core.KestrelHttpServer
 
         public void ConfigureServices(IServiceCollection services)
         {
-             services.AddMvc();
-            if (AppConfig.SwaggerOptions != null)
-            {
-                services.AddSwaggerGen(options =>
-                {
-                    options.SwaggerDoc(AppConfig.SwaggerOptions.Version, AppConfig.SwaggerOptions);
-                    options.GenerateSwaggerDoc(_serviceEntryProvider.GetALLEntries());
-                    options.DocInclusionPredicateV2((docName, apiDesc) =>
-                    {
-                        if (docName == AppConfig.SwaggerOptions.Version)
-                            return true;
-                        var assembly = apiDesc.Type.Assembly;
-
-                        var title = assembly
-                            .GetCustomAttributes(true)
-                            .OfType<AssemblyTitleAttribute>();
-
-                        return title.Any(v => v.Title== docName);
-                    });
-                    var xmlPaths = _serviceSchemaProvider.GetSchemaFilesPath();
-                    foreach (var xmlPath in xmlPaths)
-                        options.IncludeXmlComments(xmlPath);
-                });
-            }
+            services.AddMvc();
+            _moduleProvider.ConfigureServices(services);
         }
 
         private void AppResolve(IApplicationBuilder app)
         {
             app.UseStaticFiles();
             app.UseMvc();
-            if (AppConfig.SwaggerOptions != null)
-            {
-                app.UseSwagger();
-                app.UseSwaggerUI(c =>
-                {
-                    c.SwaggerEndpoint($"/swagger/{AppConfig.SwaggerOptions.Version}/swagger.json", AppConfig.SwaggerOptions.Title);
-                    c.SwaggerEndpoint(_serviceEntryProvider.GetALLEntries()); 
-                });
-            }
-       
+            _moduleProvider.Initialize(app);
             app.Run(async (context) =>
             {
                 var sender = new HttpServerMessageSender(_serializer, context);
@@ -124,6 +93,6 @@ namespace Surging.Core.KestrelHttpServer
         {
             _host.Dispose();
         }
-        
+
     }
 }
