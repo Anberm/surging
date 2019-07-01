@@ -28,7 +28,7 @@ namespace Surging.Services.Server
 {
     public class Program
     {
-        static void Main(string[] args)
+        public static void Main(string[] args)
         {
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             var host = new ServiceHostBuilder()
@@ -49,10 +49,10 @@ namespace Surging.Services.Server
                     logger.AddConfiguration(
                         Core.CPlatform.AppConfig.GetSection("Logging"));
                 })
-                .UseServer(options =>{ })
+                .UseServer(options => { })
                 .UseConsoleLifetime()
                 .Configure(build =>
-                build.AddCacheFile("${cachepath}|cacheSettings.json",basePath:AppContext.BaseDirectory, optional: false, reloadOnChange: true))
+                build.AddCacheFile("${cachepath}|cacheSettings.json", basePath: AppContext.BaseDirectory, optional: false, reloadOnChange: true))
                   .Configure(build =>
                 build.AddCPlatformFile("${surgingpath}|surgingSettings.json", optional: false, reloadOnChange: true))
                 .UseStartup<Startup>()
