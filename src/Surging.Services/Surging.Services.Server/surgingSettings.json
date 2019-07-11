@@ -40,11 +40,10 @@
   "Stage": {
     "EnableHttps": true, // 不设置ports，默认httpsPort:443
     "CertificateFileName": "${CertificateFileName}|",
-    "CertificatePassword": "${CertificatePassword}|",
-    "Ports": {
-      "Https": "${StageHttpsPorts}|443,442,445",
-      "Http": "${StageHttpPorts}|280,281,282"
-    }
+    "CertificateLocation": "${CertificateLocation}|pfxs",
+    "CertificatePassword": "${CertificatePassword}|"
+    //"HttpsPort": "${StageHttpsPorts}|449,446",
+    //"HttpPorts": "${StageHttpPorts}|281,282,283"
   },
   "Dns": {
     "RootDnsAddress": "192.168.1.1",
