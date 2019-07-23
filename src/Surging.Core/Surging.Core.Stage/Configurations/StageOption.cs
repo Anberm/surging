@@ -16,6 +16,12 @@ namespace Surging.Core.Stage.Configurations
 
         public string HttpsPort { get;  set; }
 
+        public bool IsCamelCaseResolver { get; set; }
+
+        public ApiGetwayOption ApiGetWay { get; set; }
+
+        public AccessPolicyOption Policy { get; set; }
+
         public string HttpPorts { get;  set; }
     }
 }
