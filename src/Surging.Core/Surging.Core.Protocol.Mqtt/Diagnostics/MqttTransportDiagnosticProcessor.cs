@@ -4,71 +4,70 @@ using Surging.Core.CPlatform.Serialization;
 using Surging.Core.CPlatform.Utilities;
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Text;
 using SurgingEvents = Surging.Core.CPlatform.Diagnostics.DiagnosticListenerExtensions;
 
-namespace Surging.Core.KestrelHttpServer.Diagnostics
+namespace Surging.Core.Protocol.Mqtt.Diagnostics
 {
-   public class RestTransportDiagnosticProcessor : ITracingDiagnosticProcessor
+     public class MqttTransportDiagnosticProcessor: ITracingDiagnosticProcessor
     {
         private Func<TransportEventData, string> _transportOperationNameResolver;
         public string ListenerName => SurgingEvents.DiagnosticListenerName;
 
 
-        private readonly ConcurrentDictionary<string, SegmentContext> _resultDictionary =
-            new ConcurrentDictionary<string, SegmentContext>();
-
         private readonly ISerializer<string> _serializer;
         private readonly ITracingContext _tracingContext;
+        private readonly IEntrySegmentContextAccessor _segmentContextAccessor;
 
         public Func<TransportEventData, string> TransportOperationNameResolver
         {
             get
             {
                 return _transportOperationNameResolver ??
-                       (_transportOperationNameResolver = (data) => "Rest-Transport:: " + data.Message.MessageName);
+                       (_transportOperationNameResolver = (data) => "Mqtt-Transport:: " + data.Message.MessageName);
             }
             set => _transportOperationNameResolver =
                 value ?? throw new ArgumentNullException(nameof(TransportOperationNameResolver));
         }
 
-        public RestTransportDiagnosticProcessor(ITracingContext tracingContext,ISerializer<string> serializer)
+        public MqttTransportDiagnosticProcessor(ITracingContext tracingContext, ISerializer<string> serializer, IEntrySegmentContextAccessor contextAccessor)
         {
             _tracingContext = tracingContext;
             _serializer = serializer;
+            _segmentContextAccessor = contextAccessor;
         }
 
-        [DiagnosticName(SurgingEvents.SurgingBeforeTransport, TransportType.Rest)]
+        [DiagnosticName(SurgingEvents.SurgingBeforeTransport, TransportType.Mqtt)]
         public void TransportBefore([Object] TransportEventData eventData)
         {
-            var message = eventData.Message.GetContent<HttpMessage>();
+            var message = eventData.Message.GetContent<RemoteInvokeMessage>();
             var operationName = TransportOperationNameResolver(eventData);
-            var context = _tracingContext.CreateEntrySegmentContext(operationName,
-                new RestTransportCarrierHeaderCollection(eventData.Headers));
-            context.TraceId = ConvertUniqueId(eventData);
+            var context = _tracingContext.CreateEntrySegmentContext(operationName, new MqttTransportCarrierHeaderCollection(eventData.Headers));
+            if (!string.IsNullOrEmpty(eventData.TraceId))
+                context.TraceId = ConvertUniqueId(eventData);
             context.Span.AddLog(LogEvent.Message($"Worker running at: {DateTime.Now}"));
-            context.Span.SpanLayer = SpanLayer.HTTP;
-            context.Span.Peer = new StringOrIntValue(eventData.RemoteAddress);
-            context.Span.AddTag(Tags.REST_METHOD, eventData.Method.ToString());
+            context.Span.SpanLayer = SpanLayer.RPC_FRAMEWORK;
+            context.Span.AddTag(Tags.MQTT_CLIENT_ID, eventData.TraceId.ToString());
+            context.Span.AddTag(Tags.MQTT_METHOD, eventData.Method.ToString());
             context.Span.AddTag(Tags.REST_PARAMETERS, _serializer.Serialize(message.Parameters));
-            context.Span.AddTag(Tags.REST_LOCAL_ADDRESS, NetUtils.GetHostAddress().ToString());
-            _resultDictionary.TryAdd(eventData.OperationId.ToString(), context);
+            context.Span.AddTag(Tags.MQTT_BROKER_ADDRESS, NetUtils.GetHostAddress().ToString());
         }
 
-        [DiagnosticName(SurgingEvents.SurgingAfterTransport, TransportType.Rest)]
+        [DiagnosticName(SurgingEvents.SurgingAfterTransport, TransportType.Mqtt)]
         public void TransportAfter([Object] ReceiveEventData eventData)
         {
-            _resultDictionary.TryRemove(eventData.OperationId.ToString(), out SegmentContext context);
+            var context = _segmentContextAccessor.Context;
             if (context != null)
             {
                 _tracingContext.Release(context);
             }
         }
 
-        [DiagnosticName(SurgingEvents.SurgingErrorTransport, TransportType.Rest)]
+        [DiagnosticName(SurgingEvents.SurgingErrorTransport, TransportType.Mqtt)]
         public void TransportError([Object] TransportErrorEventData eventData)
         {
-            _resultDictionary.TryRemove(eventData.OperationId.ToString(), out SegmentContext context);
+            var context = _segmentContextAccessor.Context;
             if (context != null)
             {
                 context.Span.ErrorOccurred(eventData.Exception);
@@ -80,7 +79,7 @@ namespace Surging.Core.KestrelHttpServer.Diagnostics
         {
             long part1 = 0, part2 = 0, part3 = 0;
             UniqueId uniqueId = new UniqueId();
-            var bytes = Encoding.Default.GetBytes(eventData.TraceId);
+            var bytes = Encoding.Default.GetBytes($"{eventData.TraceId}-{nameof(MqttTransportDiagnosticProcessor)}");
             part1 = BitConverter.ToInt64(bytes, 0);
             if (eventData.TraceId.Length > 8)
                 part2 = BitConverter.ToInt64(bytes, 8);
